@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/kira-spatial-3d",
+    "crates/kira-spatial-3d-cli",
+    "crates/kira-spatial-3d-viewer",
+]
+resolver = "2"
