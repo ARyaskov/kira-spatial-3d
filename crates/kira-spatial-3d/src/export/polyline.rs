@@ -6,10 +6,9 @@ use serde::Serialize;
 
 use crate::Error;
 use crate::contour::PolylineSet;
-use crate::export::floatfmt::{FloatFmt, fmt_f32, sanitize_f32};
+use crate::export::floatfmt::{FloatFmt, sanitize_f32, write_fmt_f32};
 use crate::metrics::RidgeMetrics;
 
-/// TSV float formatting options.
 #[derive(Clone, Copy, Debug)]
 pub struct TsvOptions {
     pub float: FloatFmt,
@@ -48,7 +47,7 @@ pub struct RidgeMetricsJson {
     pub mean_abs_turn_angle: f32,
 }
 
-/// Writes compact deterministic JSON for stitched polylines.
+/// Write compact JSON for stitched polylines. Wire format is 3-tuple `[x, y, z]`.
 pub fn write_polylines_json<W: Write>(set: &PolylineSet, w: W) -> Result<(), Error> {
     let dto = PolylineJson {
         level: sanitize_f32(set.level),
@@ -57,7 +56,7 @@ pub fn write_polylines_json<W: Write>(set: &PolylineSet, w: W) -> Result<(), Err
             .iter()
             .map(|p| PolylineJsonItem {
                 is_closed: p.is_closed,
-                points: p.points.iter().copied().map(sanitize_point).collect(),
+                points: p.iter_3d().map(sanitize_point).collect(),
             })
             .collect(),
     };
@@ -65,14 +64,12 @@ pub fn write_polylines_json<W: Write>(set: &PolylineSet, w: W) -> Result<(), Err
     Ok(())
 }
 
-/// Saves compact deterministic JSON for stitched polylines.
 pub fn save_polylines_json<P: AsRef<Path>>(set: &PolylineSet, path: P) -> Result<(), Error> {
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
     write_polylines_json(set, writer)
 }
 
-/// Writes compact deterministic JSON for ridge metrics.
 pub fn write_ridge_metrics_json<W: Write>(m: &RidgeMetrics, w: W) -> Result<(), Error> {
     let dto = RidgeMetricsJson {
         level: sanitize_f32(m.level),
@@ -89,14 +86,13 @@ pub fn write_ridge_metrics_json<W: Write>(m: &RidgeMetrics, w: W) -> Result<(), 
     Ok(())
 }
 
-/// Saves compact deterministic JSON for ridge metrics.
 pub fn save_ridge_metrics_json<P: AsRef<Path>>(m: &RidgeMetrics, path: P) -> Result<(), Error> {
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
     write_ridge_metrics_json(m, writer)
 }
 
-/// Writes one row per polyline point.
+/// Write one TSV row per polyline point.
 pub fn write_polylines_tsv<W: Write>(
     set: &PolylineSet,
     w: W,
@@ -108,23 +104,19 @@ pub fn write_polylines_tsv<W: Write>(
     for (polyline_id, p) in set.polylines.iter().enumerate() {
         let is_closed = usize::from(p.is_closed);
         for (point_id, point) in p.points.iter().enumerate() {
-            writeln!(
-                w,
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                fmt_f32(set.level, opts.float),
-                polyline_id,
-                point_id,
-                is_closed,
-                fmt_f32(point[0], opts.float),
-                fmt_f32(point[1], opts.float),
-                fmt_f32(point[2], opts.float),
-            )?;
+            write_fmt_f32(&mut w, set.level, opts.float)?;
+            write!(w, "\t{polyline_id}\t{point_id}\t{is_closed}\t")?;
+            write_fmt_f32(&mut w, point[0], opts.float)?;
+            w.write_all(b"\t")?;
+            write_fmt_f32(&mut w, point[1], opts.float)?;
+            w.write_all(b"\t")?;
+            write_fmt_f32(&mut w, p.level, opts.float)?;
+            w.write_all(b"\n")?;
         }
     }
     Ok(())
 }
 
-/// Saves one-row-per-point polyline TSV.
 pub fn save_polylines_tsv<P: AsRef<Path>>(
     set: &PolylineSet,
     path: P,
@@ -135,7 +127,6 @@ pub fn save_polylines_tsv<P: AsRef<Path>>(
     write_polylines_tsv(set, writer, opts)
 }
 
-/// Writes single-row ridge metrics TSV with deterministic header order.
 pub fn write_ridge_metrics_tsv<W: Write>(
     m: &RidgeMetrics,
     w: W,
@@ -146,23 +137,23 @@ pub fn write_ridge_metrics_tsv<W: Write>(
         w,
         "level\tnum_polylines\tnum_closed\tnum_open\ttotal_length\tmean_length\tfragmentation_index\tnum_endpoints\tmean_abs_turn_angle"
     )?;
-    writeln!(
+    write_fmt_f32(&mut w, m.level, opts.float)?;
+    write!(
         w,
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        fmt_f32(m.level, opts.float),
-        m.num_polylines,
-        m.num_closed,
-        m.num_open,
-        fmt_f32(m.total_length, opts.float),
-        fmt_f32(m.mean_length, opts.float),
-        fmt_f32(m.fragmentation_index, opts.float),
-        m.num_endpoints,
-        fmt_f32(m.mean_abs_turn_angle, opts.float),
+        "\t{}\t{}\t{}\t",
+        m.num_polylines, m.num_closed, m.num_open
     )?;
+    write_fmt_f32(&mut w, m.total_length, opts.float)?;
+    w.write_all(b"\t")?;
+    write_fmt_f32(&mut w, m.mean_length, opts.float)?;
+    w.write_all(b"\t")?;
+    write_fmt_f32(&mut w, m.fragmentation_index, opts.float)?;
+    write!(w, "\t{}\t", m.num_endpoints)?;
+    write_fmt_f32(&mut w, m.mean_abs_turn_angle, opts.float)?;
+    w.write_all(b"\n")?;
     Ok(())
 }
 
-/// Saves ridge metrics TSV.
 pub fn save_ridge_metrics_tsv<P: AsRef<Path>>(
     m: &RidgeMetrics,
     path: P,

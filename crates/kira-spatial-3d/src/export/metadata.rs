@@ -41,14 +41,12 @@ pub struct ContourMeta {
     pub quantize_grid: f32,
 }
 
-/// Contour constructor input for metadata generation.
 pub struct ContourMetaInput<'a> {
     pub levels: &'a [f32],
     pub quantize: Quantize,
 }
 
 impl Spatial3dMetadata {
-    /// Creates deterministic metadata from projection/mapping specs.
     pub fn from_specs(
         domain: SpatialDomain,
         height: HeightMapSpec,
@@ -80,14 +78,14 @@ impl Spatial3dMetadata {
     }
 }
 
-/// Writes compact deterministic metadata JSON.
+/// Write compact metadata JSON to a stream.
 pub fn write_metadata_json<W: Write>(m: &Spatial3dMetadata, w: W) -> Result<(), Error> {
     let sanitized = sanitize_metadata(m);
     serde_json::to_writer(w, &sanitized)?;
     Ok(())
 }
 
-/// Saves compact deterministic metadata JSON.
+/// Save compact metadata JSON to disk.
 pub fn save_metadata_json<P: AsRef<Path>>(m: &Spatial3dMetadata, path: P) -> Result<(), Error> {
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
@@ -118,7 +116,8 @@ fn sanitize_metadata(m: &Spatial3dMetadata) -> Spatial3dMetadata {
     }
 }
 
-fn height_mode_name(mode: HeightMode) -> &'static str {
+/// Stable string tag for a [`HeightMode`] variant.
+pub fn height_mode_name(mode: HeightMode) -> &'static str {
     match mode {
         HeightMode::Raw => "raw",
         HeightMode::Abs => "abs",
@@ -126,7 +125,8 @@ fn height_mode_name(mode: HeightMode) -> &'static str {
     }
 }
 
-fn normalization_name(norm: Normalization) -> String {
+/// Stable string description for a [`Normalization`] policy.
+pub fn normalization_name(norm: Normalization) -> String {
     match norm {
         Normalization::None => "none".to_string(),
         Normalization::MinMax { clip } => match clip {

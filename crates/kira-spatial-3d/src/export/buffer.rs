@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, Mesh};
 
-/// Metadata for deterministic K3D mesh buffer v1.
+/// Metadata for K3D mesh buffer v1.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct K3dMeshMeta {
     pub version: String,
@@ -21,7 +21,6 @@ pub struct K3dMeshMeta {
     pub index_format: String,
 }
 
-/// Options for K3D buffer export.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferOptions {
     pub write_normals: bool,
@@ -35,7 +34,7 @@ impl Default for BufferOptions {
     }
 }
 
-/// Writes `<prefix>.k3d.bin` and `<prefix>.k3d.json`.
+/// Write `<prefix>.k3d.bin` and `<prefix>.k3d.json`. Wire format: LE-packed `f32`/`u32`.
 pub fn write_k3d_mesh_buffer<P: AsRef<Path>>(
     mesh: &Mesh,
     out_prefix: P,
@@ -86,22 +85,31 @@ pub fn write_k3d_mesh_buffer<P: AsRef<Path>>(
         let file = File::create(&bin_path)?;
         let mut w = BufWriter::new(file);
 
-        for p in &mesh.vertices {
-            for c in p {
-                w.write_all(&c.to_le_bytes())?;
+        #[cfg(target_endian = "little")]
+        {
+            w.write_all(bytemuck::cast_slice::<[f32; 3], u8>(&mesh.vertices))?;
+            if opts.write_normals {
+                w.write_all(bytemuck::cast_slice::<[f32; 3], u8>(&mesh.normals))?;
             }
+            w.write_all(bytemuck::cast_slice::<u32, u8>(&mesh.indices))?;
         }
-
-        if opts.write_normals {
-            for n in &mesh.normals {
-                for c in n {
+        #[cfg(target_endian = "big")]
+        {
+            for p in &mesh.vertices {
+                for c in p {
                     w.write_all(&c.to_le_bytes())?;
                 }
             }
-        }
-
-        for &idx in &mesh.indices {
-            w.write_all(&idx.to_le_bytes())?;
+            if opts.write_normals {
+                for n in &mesh.normals {
+                    for c in n {
+                        w.write_all(&c.to_le_bytes())?;
+                    }
+                }
+            }
+            for &idx in &mesh.indices {
+                w.write_all(&idx.to_le_bytes())?;
+            }
         }
         w.flush()?;
     }

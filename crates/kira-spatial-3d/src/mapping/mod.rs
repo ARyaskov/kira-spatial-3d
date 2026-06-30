@@ -2,14 +2,14 @@ pub mod height;
 pub mod normalize;
 
 pub use height::{HeightMapSpec, HeightMode, build_heights};
-pub use normalize::{Normalization, NormalizeOptions, normalize, validate_normalization};
+pub use normalize::{
+    Normalization, NormalizeOptions, normalize, normalize_with, validate_normalization,
+};
 
 use crate::mesh::heightmap::{HeightmapOptions, build_heightmap_mesh};
 use crate::{Error, Mesh, ScalarField, SpatialDomain};
 
 /// Owned heights bound to a spatial domain.
-///
-/// This adapter allows reusing the canonical deterministic heightmap triangulation.
 #[derive(Debug, Clone)]
 pub struct HeightField {
     pub domain: SpatialDomain,
@@ -17,9 +17,6 @@ pub struct HeightField {
 }
 
 impl HeightField {
-    /// Returns a borrowed scalar field view over this owned height buffer.
-    ///
-    /// Panics if the internal buffer length does not match domain size.
     pub fn as_scalar_field(&self) -> ScalarField<'_> {
         assert_eq!(
             self.heights.len(),
@@ -33,7 +30,7 @@ impl HeightField {
     }
 }
 
-/// Convenience helper: map scalar values to deterministic heights and build a mesh.
+/// Map scalar values to heights and build a heightmap mesh in one call.
 pub fn build_heightmap_mesh_mapped(
     field: &ScalarField<'_>,
     spec: HeightMapSpec,

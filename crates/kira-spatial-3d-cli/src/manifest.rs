@@ -23,8 +23,17 @@ pub struct ManifestDomain {
 #[derive(Debug, Deserialize)]
 pub struct ManifestField {
     pub name: String,
-    pub format: String,
+    pub format: ManifestFieldFormat,
     pub path: String,
+}
+
+/// Wire format for the on-disk field buffer.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum ManifestFieldFormat {
+    /// Tightly-packed little-endian f32, row-major.
+    F32Le,
 }
 
 #[derive(Debug, Deserialize)]

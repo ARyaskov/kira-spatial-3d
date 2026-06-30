@@ -8,12 +8,12 @@ pub mod ply;
 pub mod polyline;
 
 pub use buffer::{BufferOptions, K3dMeshMeta, write_k3d_mesh_buffer};
-pub use floatfmt::{FloatFmt, fmt_f32};
+pub use floatfmt::{FloatFmt, fmt_f32, write_fmt_f32};
 #[cfg(feature = "gltf")]
 pub use gltf::{GltfOptions, write_gltf};
 pub use metadata::{
-    ContourMeta, ContourMetaInput, DomainMeta, HeightMeta, Spatial3dMetadata, save_metadata_json,
-    write_metadata_json,
+    ContourMeta, ContourMetaInput, DomainMeta, HeightMeta, Spatial3dMetadata, height_mode_name,
+    normalization_name, save_metadata_json, write_metadata_json,
 };
 pub use obj::{ObjOptions, save_obj, write_obj};
 pub use ply::{PlyOptions, save_ply, write_ply};
@@ -30,7 +30,6 @@ use crate::contour::PolylineSet;
 use crate::metrics::RidgeMetrics;
 use crate::{Error, Mesh};
 
-/// Options for exporting a deterministic artifact bundle.
 #[derive(Clone, Copy, Debug)]
 pub struct ExportBundleOptions {
     pub float: FloatFmt,
@@ -58,7 +57,7 @@ impl Default for ExportBundleOptions {
     }
 }
 
-/// Exports geometry artifacts into `out_dir` with deterministic file names.
+/// Export geometry artifacts into `out_dir` with fixed file names.
 pub fn export_bundle<P: AsRef<Path>>(
     out_dir: P,
     mesh: Option<&Mesh>,

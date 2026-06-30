@@ -1,5 +1,6 @@
 /// Runtime backend selection for deterministic compute kernels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ComputeBackend {
     /// Use best available backend for this binary/CPU.
     Auto,

@@ -14,6 +14,7 @@ pub fn compute_normals_heightmap(
         nx * ny,
         "normals length must match nx*ny"
     );
+    debug_assert!(nx >= 2 && ny >= 2, "domain must be at least 2x2");
 
     let inv_2sx = 1.0 / (2.0 * step_x);
     let inv_2sy = 1.0 / (2.0 * step_y);
@@ -65,6 +66,22 @@ pub fn apply_mode_and_affine(
         }
         let mapped = z_offset + z_scale * v;
         *dst = if mapped == 0.0 { 0.0 } else { mapped };
+    }
+}
+
+/// `out[i] = (input[i] - min) * inv` if finite else `0.0`. `inv = 1.0 / denom` is pre-computed.
+pub fn apply_sub_div_finite(input: &[f32], min: f32, inv: f32, out: &mut [f32]) {
+    assert_eq!(
+        input.len(),
+        out.len(),
+        "input and output lengths must match"
+    );
+    for (src, dst) in input.iter().copied().zip(out.iter_mut()) {
+        *dst = if src.is_finite() {
+            (src - min) * inv
+        } else {
+            0.0
+        };
     }
 }
 

@@ -90,8 +90,7 @@ impl OrbitCamera {
     }
 }
 
-// Right-handed perspective matrix with depth range 0..1 (WebGPU/WGSL NDC).
-// Matrices are stored column-major to match WGSL `mat4x4<f32>` layout.
+// Right-handed perspective, depth 0..1 (WebGPU NDC), column-major.
 fn perspective_rh_zo(fovy: f32, aspect: f32, z_near: f32, z_far: f32) -> [[f32; 4]; 4] {
     let f = 1.0 / (0.5 * fovy).tan();
     let nf = 1.0 / (z_near - z_far);
@@ -116,7 +115,6 @@ fn look_at_rh(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [[f32; 4]; 4] {
     ]
 }
 
-// Column-major multiplication: out = a * b
 fn mul_mat4(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     let mut out = [[0.0; 4]; 4];
     for c in 0..4 {

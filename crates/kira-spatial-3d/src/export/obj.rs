@@ -2,10 +2,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use crate::export::floatfmt::{FloatFmt, fmt_f32};
+use crate::export::floatfmt::{FloatFmt, write_fmt_f32};
 use crate::{Error, Mesh};
 
-/// OBJ export settings.
 #[derive(Clone, Copy, Debug)]
 pub struct ObjOptions {
     pub float: FloatFmt,
@@ -21,30 +20,30 @@ impl Default for ObjOptions {
     }
 }
 
-/// Writes a deterministic ASCII OBJ stream.
+/// Write ASCII OBJ to a stream.
 pub fn write_obj<W: Write>(mesh: &Mesh, w: W, opts: ObjOptions) -> Result<(), Error> {
     let mut w = w;
     w.write_all(b"# kira-spatial-3d obj v1\n")?;
 
     for p in &mesh.vertices {
-        writeln!(
-            w,
-            "v {} {} {}",
-            fmt_f32(p[0], opts.float),
-            fmt_f32(p[1], opts.float),
-            fmt_f32(p[2], opts.float)
-        )?;
+        w.write_all(b"v ")?;
+        write_fmt_f32(&mut w, p[0], opts.float)?;
+        w.write_all(b" ")?;
+        write_fmt_f32(&mut w, p[1], opts.float)?;
+        w.write_all(b" ")?;
+        write_fmt_f32(&mut w, p[2], opts.float)?;
+        w.write_all(b"\n")?;
     }
 
     if opts.write_normals {
         for n in &mesh.normals {
-            writeln!(
-                w,
-                "vn {} {} {}",
-                fmt_f32(n[0], opts.float),
-                fmt_f32(n[1], opts.float),
-                fmt_f32(n[2], opts.float)
-            )?;
+            w.write_all(b"vn ")?;
+            write_fmt_f32(&mut w, n[0], opts.float)?;
+            w.write_all(b" ")?;
+            write_fmt_f32(&mut w, n[1], opts.float)?;
+            w.write_all(b" ")?;
+            write_fmt_f32(&mut w, n[2], opts.float)?;
+            w.write_all(b"\n")?;
         }
     }
 
@@ -62,7 +61,7 @@ pub fn write_obj<W: Write>(mesh: &Mesh, w: W, opts: ObjOptions) -> Result<(), Er
     Ok(())
 }
 
-/// Saves deterministic ASCII OBJ to disk.
+/// Save ASCII OBJ to disk.
 pub fn save_obj<P: AsRef<Path>>(mesh: &Mesh, path: P, opts: ObjOptions) -> Result<(), Error> {
     let file = File::create(path)?;
     let writer = BufWriter::new(file);

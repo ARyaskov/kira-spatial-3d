@@ -1,0 +1,6 @@
+# Workspace-wide Clippy tuning. Lints are otherwise inherited from the
+# default `cargo clippy` set; `-D warnings` in CI promotes them to errors.
+
+# Allow `..` patterns in deterministic match arms over `#[non_exhaustive]`
+# enums (used in CLI manifest mapping).
+msrv = "1.95"

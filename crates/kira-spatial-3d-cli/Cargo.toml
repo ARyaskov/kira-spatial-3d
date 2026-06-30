@@ -1,23 +1,17 @@
 [package]
 name = "kira-spatial-3d-cli"
 description = "Command-line interface for deterministic spatial 3D mesh and contour export."
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.95"
-license = "MIT"
-repository = "https://github.com/ARyaskov/kira-spatial-3d"
-keywords = [
-    "bioinformatics",
-    "spatial",
-    "3d",
-    "cli",
-    "oncology"
-]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
 categories = [
     "science",
     "science::bioinformatics",
     "science::bioinformatics::genomics",
-    "command-line-utilities"
+    "command-line-utilities",
 ]
 
 [lib]
@@ -29,9 +23,9 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 kira-spatial-3d.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

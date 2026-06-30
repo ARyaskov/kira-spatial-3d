@@ -1,20 +1,18 @@
 use crate::mapping::normalize::{
-    Normalization, NormalizeOptions, normalize, validate_normalization,
+    Normalization, NormalizeOptions, normalize_with, validate_normalization,
 };
 use crate::{ComputeConfig, Error, ScalarField, simd};
 
-/// Controls how scalar values are interpreted before normalization.
+/// How scalar values are interpreted before normalization.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub enum HeightMode {
-    /// Use finite values as-is.
     Raw,
-    /// Use `abs(v)` for finite values.
     Abs,
-    /// Same numerical behavior as `Raw`, kept explicit for signed fields (for example, Δf).
     Signed,
 }
 
-/// Full deterministic mapping spec from field values to final mesh heights.
+/// Mapping spec from field values to final mesh heights.
 #[derive(Clone, Copy, Debug)]
 pub struct HeightMapSpec {
     pub mode: HeightMode,
@@ -24,10 +22,7 @@ pub struct HeightMapSpec {
     pub compute: ComputeConfig,
 }
 
-/// Builds a mapped height buffer with length equal to `field.domain.len()`.
-///
-/// Non-finite inputs are treated as missing and produce `0.0` after normalization.
-/// Final output is always affine-mapped: `z = z_offset + z_scale * normed`.
+/// Build heights with `len == field.domain.len()`. Non-finite → 0, then `z = z_offset + z_scale * normed`.
 pub fn build_heights(field: &ScalarField<'_>, spec: HeightMapSpec) -> Result<Vec<f32>, Error> {
     validate_normalization(&spec.normalization)?;
     if !spec.z_scale.is_finite() {
@@ -63,11 +58,12 @@ pub fn build_heights(field: &ScalarField<'_>, spec: HeightMapSpec) -> Result<Vec
         tmp.push(mapped);
     }
 
-    let normed = normalize(
+    let normed = normalize_with(
         &tmp,
         NormalizeOptions {
             policy: spec.normalization,
         },
+        spec.compute,
     );
     let mut out = vec![0.0_f32; normed.len()];
     simd::apply_mode_and_affine(

@@ -16,7 +16,8 @@ use serde::Serialize;
 pub mod manifest;
 
 use manifest::{
-    ManifestContours, ManifestDomain, ManifestHeightMode, ManifestNormalization, ManifestV1,
+    ManifestContours, ManifestDomain, ManifestFieldFormat, ManifestHeightMode,
+    ManifestNormalization, ManifestV1,
 };
 
 #[derive(Debug)]
@@ -74,11 +75,8 @@ pub fn run_manifest(
             manifest.field.path
         )));
     }
-    if manifest.field.format != "f32le" {
-        return Err(CliError::Manifest(format!(
-            "unsupported field format: {}",
-            manifest.field.format
-        )));
+    match manifest.field.format {
+        ManifestFieldFormat::F32Le => {}
     }
 
     let domain = build_domain(&manifest.domain)?;
@@ -288,8 +286,8 @@ fn build_normed_and_z(
                 return f32::NAN;
             }
             match spec.mode {
-                HeightMode::Raw | HeightMode::Signed => v,
                 HeightMode::Abs => v.abs(),
+                _ => v,
             }
         })
         .collect::<Vec<f32>>();

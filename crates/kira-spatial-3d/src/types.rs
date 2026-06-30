@@ -1,30 +1,43 @@
 use core::fmt;
 
-/// Crate-level errors for deterministic mesh projection.
+/// Crate-level errors.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
-    /// Regular grid parameters are invalid.
     InvalidDomain {
         nx: usize,
         ny: usize,
         step_x: f32,
         step_y: f32,
     },
-    /// Scalar field values length does not match domain cell count.
-    LengthMismatch { expected: usize, got: usize },
-    /// The domain cannot be indexed with `u32`.
-    IndexOverflow { vertex_count: usize },
-    /// Normalization options are invalid.
-    InvalidNormalization { message: &'static str },
-    /// Height mapping specification is invalid.
-    InvalidHeightSpec { message: &'static str },
-    /// Contour extraction specification is invalid.
-    InvalidContourSpec { message: &'static str },
-    /// Export specification is invalid.
-    InvalidExportSpec { message: &'static str },
-    /// IO layer error.
+    LengthMismatch {
+        expected: usize,
+        got: usize,
+    },
+    IndexOverflow {
+        vertex_count: usize,
+    },
+    InvalidNormalization {
+        message: &'static str,
+    },
+    InvalidHeightSpec {
+        message: &'static str,
+    },
+    InvalidContourSpec {
+        message: &'static str,
+    },
+    InvalidExportSpec {
+        message: &'static str,
+    },
+    InvalidMeshTopology {
+        message: &'static str,
+    },
     Io(std::io::Error),
-    /// JSON serialization error.
+    IoContext {
+        path: std::path::PathBuf,
+        operation: &'static str,
+        source: std::io::Error,
+    },
     SerdeJson(serde_json::Error),
 }
 
@@ -61,7 +74,17 @@ impl fmt::Display for Error {
             Self::InvalidExportSpec { message } => {
                 write!(f, "invalid export spec: {message}")
             }
+            Self::InvalidMeshTopology { message } => {
+                write!(f, "invalid mesh topology: {message}")
+            }
             Self::Io(err) => write!(f, "io error: {err}"),
+            Self::IoContext {
+                path,
+                operation,
+                source,
+            } => {
+                write!(f, "io error while {operation} {}: {source}", path.display())
+            }
             Self::SerdeJson(err) => write!(f, "serde json error: {err}"),
         }
     }
@@ -81,10 +104,7 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-/// Regular 2D spatial domain used as the base for deterministic projection.
-///
-/// # Determinism
-/// Indexing is row-major with `y` as the outer scanline and `x` as the inner axis.
+/// Regular 2D spatial domain. Row-major: `y` outer, `x` inner.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpatialDomain {
     pub nx: usize,
@@ -96,7 +116,6 @@ pub struct SpatialDomain {
 }
 
 impl SpatialDomain {
-    /// Creates and validates a regular grid domain.
     pub fn new(
         nx: usize,
         ny: usize,
@@ -117,7 +136,6 @@ impl SpatialDomain {
         Ok(domain)
     }
 
-    /// Validates domain invariants.
     pub fn validate(&self) -> Result<(), Error> {
         if self.nx < 2 || self.ny < 2 || self.step_x <= 0.0 || self.step_y <= 0.0 {
             return Err(Error::InvalidDomain {
@@ -130,21 +148,16 @@ impl SpatialDomain {
         Ok(())
     }
 
-    /// Number of scalar samples in row-major order.
     #[inline]
     pub fn len(&self) -> usize {
         self.nx * self.ny
     }
 
-    /// Returns `true` if the domain has zero samples.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Converts `(x, y)` to row-major linear index (`y * nx + x`).
-    ///
-    /// Panics if `(x, y)` is out of bounds.
     #[inline]
     pub fn idx(&self, x: usize, y: usize) -> usize {
         assert!(x < self.nx, "x out of bounds: {x} >= {}", self.nx);
@@ -152,9 +165,6 @@ impl SpatialDomain {
         y * self.nx + x
     }
 
-    /// Converts row-major linear index back to `(x, y)`.
-    ///
-    /// Panics if `idx` is out of bounds.
     #[inline]
     pub fn xy(&self, idx: usize) -> (usize, usize) {
         assert!(
@@ -165,9 +175,6 @@ impl SpatialDomain {
         (idx % self.nx, idx / self.nx)
     }
 
-    /// Returns world-space `(x, y)` for grid coordinate `(x, y)`.
-    ///
-    /// Panics if `(x, y)` is out of bounds.
     #[inline]
     pub fn pos(&self, x: usize, y: usize) -> (f32, f32) {
         let _ = self.idx(x, y);
@@ -186,7 +193,6 @@ pub struct ScalarField<'a> {
 }
 
 impl<'a> ScalarField<'a> {
-    /// Creates a borrowed scalar field and validates length/domain invariants.
     pub fn new(domain: SpatialDomain, values: &'a [f32]) -> Result<Self, Error> {
         domain.validate()?;
         if values.len() != domain.len() {
@@ -198,27 +204,94 @@ impl<'a> ScalarField<'a> {
         Ok(Self { domain, values })
     }
 
-    /// Returns scalar value at `(x, y)` with bounds checks.
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> f32 {
         let idx = self.domain.idx(x, y);
         self.values[idx]
     }
 
-    /// Returns scalar value at `(x, y)` without bounds checks.
-    ///
     /// # Safety
     /// Caller must guarantee `x < nx` and `y < ny`.
     #[inline]
+    #[allow(unsafe_code)]
     pub unsafe fn get_unchecked(&self, x: usize, y: usize) -> f32 {
         let idx = y * self.domain.nx + x;
         unsafe { *self.values.get_unchecked(idx) }
     }
 }
 
-/// GPU-friendly triangle mesh.
-///
-/// Invariant: `vertices.len() == normals.len()` and `indices.len() % 3 == 0`.
+/// Owned scalar field. Use [`OwnedScalarField::as_view`] for algorithms.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedScalarField {
+    pub domain: SpatialDomain,
+    pub values: Vec<f32>,
+}
+
+impl OwnedScalarField {
+    pub fn new(domain: SpatialDomain, values: Vec<f32>) -> Result<Self, Error> {
+        domain.validate()?;
+        if values.len() != domain.len() {
+            return Err(Error::LengthMismatch {
+                expected: domain.len(),
+                got: values.len(),
+            });
+        }
+        Ok(Self { domain, values })
+    }
+
+    #[inline]
+    pub fn as_view(&self) -> ScalarField<'_> {
+        ScalarField {
+            domain: self.domain,
+            values: &self.values,
+        }
+    }
+
+    pub fn into_parts(self) -> (SpatialDomain, Vec<f32>) {
+        (self.domain, self.values)
+    }
+}
+
+impl<'a> From<&'a OwnedScalarField> for ScalarField<'a> {
+    fn from(value: &'a OwnedScalarField) -> Self {
+        value.as_view()
+    }
+}
+
+#[cfg(feature = "with-field")]
+pub fn from_kira_field<'a>(
+    domain: SpatialDomain,
+    field: &'a kira_spatial_field::Field,
+) -> Result<ScalarField<'a>, Error> {
+    ScalarField::new(domain, field.values())
+}
+
+/// AABB of a mesh's vertex positions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeshBounds {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
+impl MeshBounds {
+    pub fn center(&self) -> [f32; 3] {
+        [
+            0.5 * (self.min[0] + self.max[0]),
+            0.5 * (self.min[1] + self.max[1]),
+            0.5 * (self.min[2] + self.max[2]),
+        ]
+    }
+
+    pub fn radius(&self) -> f32 {
+        let c = self.center();
+        let dx = self.max[0] - c[0];
+        let dy = self.max[1] - c[1];
+        let dz = self.max[2] - c[2];
+        (dx * dx + dy * dy + dz * dz).sqrt()
+    }
+}
+
+/// GPU-friendly triangle mesh. Invariant: `vertices.len() == normals.len()`, `indices.len() % 3 == 0`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mesh {
     pub vertices: Vec<[f32; 3]>,
@@ -227,7 +300,6 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    /// Builds and validates a mesh container.
     pub fn new(
         vertices: Vec<[f32; 3]>,
         normals: Vec<[f32; 3]>,
@@ -240,9 +312,8 @@ impl Mesh {
             });
         }
         if !indices.len().is_multiple_of(3) {
-            return Err(Error::LengthMismatch {
-                expected: indices.len() / 3 * 3,
-                got: indices.len(),
+            return Err(Error::InvalidMeshTopology {
+                message: "indices length must be a multiple of 3",
             });
         }
         Ok(Self {
@@ -250,5 +321,32 @@ impl Mesh {
             normals,
             indices,
         })
+    }
+
+    #[inline]
+    pub fn vertex_count(&self) -> usize {
+        self.vertices.len()
+    }
+
+    #[inline]
+    pub fn face_count(&self) -> usize {
+        self.indices.len() / 3
+    }
+
+    pub fn bounds(&self) -> Option<MeshBounds> {
+        let first = *self.vertices.first()?;
+        let mut min = first;
+        let mut max = first;
+        for &p in self.vertices.iter().skip(1) {
+            for i in 0..3 {
+                if p[i] < min[i] {
+                    min[i] = p[i];
+                }
+                if p[i] > max[i] {
+                    max[i] = p[i];
+                }
+            }
+        }
+        Some(MeshBounds { min, max })
     }
 }

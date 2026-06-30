@@ -1,3 +1,9 @@
+#![allow(
+    clippy::collapsible_match,
+    clippy::too_many_arguments,
+    clippy::single_match
+)]
+
 use std::fmt;
 use std::path::Path;
 

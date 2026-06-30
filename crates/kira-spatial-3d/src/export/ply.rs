@@ -2,10 +2,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use crate::export::floatfmt::{FloatFmt, fmt_f32};
+use crate::export::floatfmt::{FloatFmt, write_fmt_f32};
 use crate::{Error, Mesh};
 
-/// PLY export settings.
 #[derive(Clone, Copy, Debug)]
 pub struct PlyOptions {
     pub float: FloatFmt,
@@ -21,7 +20,7 @@ impl Default for PlyOptions {
     }
 }
 
-/// Writes deterministic ASCII PLY.
+/// Write ASCII PLY to a stream.
 pub fn write_ply<W: Write>(mesh: &Mesh, w: W, opts: PlyOptions) -> Result<(), Error> {
     let mut w = w;
     let face_count = mesh.indices.len() / 3;
@@ -43,27 +42,21 @@ pub fn write_ply<W: Write>(mesh: &Mesh, w: W, opts: PlyOptions) -> Result<(), Er
     writeln!(w, "end_header")?;
 
     for (i, p) in mesh.vertices.iter().enumerate() {
+        write_fmt_f32(&mut w, p[0], opts.float)?;
+        w.write_all(b" ")?;
+        write_fmt_f32(&mut w, p[1], opts.float)?;
+        w.write_all(b" ")?;
+        write_fmt_f32(&mut w, p[2], opts.float)?;
         if opts.write_normals {
             let n = mesh.normals[i];
-            writeln!(
-                w,
-                "{} {} {} {} {} {}",
-                fmt_f32(p[0], opts.float),
-                fmt_f32(p[1], opts.float),
-                fmt_f32(p[2], opts.float),
-                fmt_f32(n[0], opts.float),
-                fmt_f32(n[1], opts.float),
-                fmt_f32(n[2], opts.float)
-            )?;
-        } else {
-            writeln!(
-                w,
-                "{} {} {}",
-                fmt_f32(p[0], opts.float),
-                fmt_f32(p[1], opts.float),
-                fmt_f32(p[2], opts.float)
-            )?;
+            w.write_all(b" ")?;
+            write_fmt_f32(&mut w, n[0], opts.float)?;
+            w.write_all(b" ")?;
+            write_fmt_f32(&mut w, n[1], opts.float)?;
+            w.write_all(b" ")?;
+            write_fmt_f32(&mut w, n[2], opts.float)?;
         }
+        w.write_all(b"\n")?;
     }
 
     for tri in mesh.indices.chunks_exact(3) {
@@ -72,7 +65,7 @@ pub fn write_ply<W: Write>(mesh: &Mesh, w: W, opts: PlyOptions) -> Result<(), Er
     Ok(())
 }
 
-/// Saves deterministic ASCII PLY to disk.
+/// Save ASCII PLY to disk.
 pub fn save_ply<P: AsRef<Path>>(mesh: &Mesh, path: P, opts: PlyOptions) -> Result<(), Error> {
     let file = File::create(path)?;
     let writer = BufWriter::new(file);

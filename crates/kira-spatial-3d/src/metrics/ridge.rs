@@ -1,7 +1,10 @@
+use core::fmt;
+
 use crate::Error;
 use crate::contour::{ContourSet, PolylineSet, StitchOptions, stitch_contours};
 
 /// Summary ridge/contour metrics for one iso-level.
+/// `fragmentation_index = num_polylines / total_length.max(1.0)` — check `total_length == 0` for "undefined".
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RidgeMetrics {
     pub level: f32,
@@ -15,7 +18,26 @@ pub struct RidgeMetrics {
     pub mean_abs_turn_angle: f32,
 }
 
-/// Computes deterministic ridge metrics from stitched polylines.
+impl fmt::Display for RidgeMetrics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "RidgeMetrics {{ level={:.4}, polylines={} (open={}, closed={}), \
+             total_length={:.4}, mean_length={:.4}, fragmentation={:.4}, \
+             endpoints={}, mean_abs_turn={:.4} }}",
+            self.level,
+            self.num_polylines,
+            self.num_open,
+            self.num_closed,
+            self.total_length,
+            self.mean_length,
+            self.fragmentation_index,
+            self.num_endpoints,
+            self.mean_abs_turn_angle,
+        )
+    }
+}
+
 pub fn compute_ridge_metrics(set: &PolylineSet) -> RidgeMetrics {
     let num_polylines = set.polylines.len();
     let num_closed = set.polylines.iter().filter(|p| p.is_closed).count();
@@ -56,7 +78,6 @@ pub fn compute_ridge_metrics(set: &PolylineSet) -> RidgeMetrics {
     }
 }
 
-/// Convenience helper: stitch ridge contours and compute ridge metrics.
 pub fn ridges_to_polylines_and_metrics(
     contours: &ContourSet,
     stitch: StitchOptions,
@@ -71,14 +92,22 @@ fn polyline_length(poly: &crate::contour::Polyline) -> f32 {
         return 0.0;
     }
 
-    let mut len = 0.0_f32;
+    // Kahan-compensated f64 sum to avoid f32 drift past ~10⁴ segments.
+    let mut sum = 0.0_f64;
+    let mut c = 0.0_f64;
+    let mut add = |x: f64| {
+        let y = x - c;
+        let t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    };
     for i in 1..poly.points.len() {
-        len += dist(poly.points[i - 1], poly.points[i]);
+        add(dist2(poly.points[i - 1], poly.points[i]) as f64);
     }
     if poly.is_closed {
-        len += dist(poly.points[poly.points.len() - 1], poly.points[0]);
+        add(dist2(poly.points[poly.points.len() - 1], poly.points[0]) as f64);
     }
-    len
+    sum as f32
 }
 
 fn accumulate_turn_angles(poly: &crate::contour::Polyline, sum: &mut f32, count: &mut usize) {
@@ -92,7 +121,7 @@ fn accumulate_turn_angles(poly: &crate::contour::Polyline, sum: &mut f32, count:
             let prev = poly.points[(i + n - 1) % n];
             let cur = poly.points[i];
             let next = poly.points[(i + 1) % n];
-            if let Some(angle) = turn_angle(prev, cur, next) {
+            if let Some(angle) = turn_angle_2d(prev, cur, next) {
                 *sum += angle;
                 *count += 1;
             }
@@ -102,7 +131,7 @@ fn accumulate_turn_angles(poly: &crate::contour::Polyline, sum: &mut f32, count:
             let prev = poly.points[i - 1];
             let cur = poly.points[i];
             let next = poly.points[i + 1];
-            if let Some(angle) = turn_angle(prev, cur, next) {
+            if let Some(angle) = turn_angle_2d(prev, cur, next) {
                 *sum += angle;
                 *count += 1;
             }
@@ -111,33 +140,28 @@ fn accumulate_turn_angles(poly: &crate::contour::Polyline, sum: &mut f32, count:
 }
 
 #[inline]
-fn turn_angle(prev: [f32; 3], cur: [f32; 3], next: [f32; 3]) -> Option<f32> {
-    let a = [cur[0] - prev[0], cur[1] - prev[1], cur[2] - prev[2]];
-    let b = [next[0] - cur[0], next[1] - cur[1], next[2] - cur[2]];
+fn turn_angle_2d(prev: [f32; 2], cur: [f32; 2], next: [f32; 2]) -> Option<f32> {
+    let a = [cur[0] - prev[0], cur[1] - prev[1]];
+    let b = [next[0] - cur[0], next[1] - cur[1]];
 
-    let la2 = dot(a, a);
-    let lb2 = dot(b, b);
+    let la2 = a[0] * a[0] + a[1] * a[1];
+    let lb2 = b[0] * b[0] + b[1] * b[1];
     if la2 == 0.0 || lb2 == 0.0 {
         return None;
     }
-    let denom = la2.sqrt() * lb2.sqrt();
-    if denom == 0.0 {
+
+    // atan2(|cross|, dot) — stable near collinear/antiparallel where acos collapses.
+    let cross = a[0] * b[1] - a[1] * b[0];
+    let dotp = a[0] * b[0] + a[1] * b[1];
+    if !cross.is_finite() || !dotp.is_finite() {
         return None;
     }
-
-    let c = (dot(a, b) / denom).clamp(-1.0, 1.0);
-    Some(c.acos())
+    Some(cross.abs().atan2(dotp))
 }
 
 #[inline]
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-#[inline]
-fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
+fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
     let dx = b[0] - a[0];
     let dy = b[1] - a[1];
-    let dz = b[2] - a[2];
-    (dx * dx + dy * dy + dz * dz).sqrt()
+    (dx * dx + dy * dy).sqrt()
 }

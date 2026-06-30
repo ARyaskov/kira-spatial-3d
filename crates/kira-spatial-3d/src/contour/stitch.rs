@@ -1,45 +1,66 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{HashMap, HashSet};
 
 use crate::Error;
 use crate::contour::types::ContourSet;
 
-/// Quantization settings for deterministic contour endpoint snapping.
+/// Endpoint snapping grid for contour stitching.
 #[derive(Clone, Copy, Debug)]
 pub struct Quantize {
     pub grid: f32,
 }
 
-/// Quantized 2D key for contour topology reconstruction.
+/// Quantized 2D key for topology reconstruction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct QKey {
     pub qx: i32,
     pub qy: i32,
 }
 
-/// A stitched contour polyline for one iso-level.
+/// Stitched contour polyline. `points` is 2D — `z` always equals `level`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Polyline {
     pub level: f32,
-    pub points: Vec<[f32; 3]>,
+    pub points: Vec<[f32; 2]>,
     pub is_closed: bool,
 }
 
-/// Collection of stitched polylines for one iso-level.
+impl Polyline {
+    pub fn iter_3d(&self) -> impl Iterator<Item = [f32; 3]> + '_ {
+        let z = self.level;
+        self.points.iter().map(move |p| [p[0], p[1], z])
+    }
+
+    pub fn point_3d(&self, idx: usize) -> [f32; 3] {
+        let p = self.points[idx];
+        [p[0], p[1], self.level]
+    }
+}
+
+/// Stitched polylines for one iso-level.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolylineSet {
     pub level: f32,
     pub polylines: Vec<Polyline>,
 }
 
-/// Stitching options.
+impl PolylineSet {
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.polylines.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.polylines.is_empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct StitchOptions {
     pub quantize: Quantize,
 }
 
-/// Builds a quantized key for a 3D point.
-///
-/// Quantization uses `x` and `y` only; `z` is ignored.
+/// Build a quantized key for a 3D point (z ignored).
 #[inline]
 pub fn qkey(p: [f32; 3], q: Quantize) -> QKey {
     let qx = (p[0] / q.grid).round() as i32;
@@ -47,19 +68,13 @@ pub fn qkey(p: [f32; 3], q: Quantize) -> QKey {
     QKey { qx, qy }
 }
 
-/// Deterministically stitches unordered contour segments into polylines.
-///
-/// # Determinism
-/// - Endpoint snapping is stable via fixed-grid quantization.
-/// - Canonical point representatives are first-seen in segment order.
-/// - Path walking is deterministic via ordered maps/sets and smallest-neighbor choice.
-/// - Closed loops are canonically rotated/oriented by lexicographic `QKey`.
+/// Deterministically stitch unordered contour segments into polylines.
 pub fn stitch_contours(set: &ContourSet, opts: StitchOptions) -> Result<PolylineSet, Error> {
     validate_quantize(opts.quantize)?;
 
-    let mut adjacency: BTreeMap<QKey, Vec<QKey>> = BTreeMap::new();
-    let mut canonical: BTreeMap<QKey, [f32; 3]> = BTreeMap::new();
-    let mut unused: BTreeSet<(QKey, QKey)> = BTreeSet::new();
+    let mut adjacency: HashMap<QKey, Vec<QKey>> = HashMap::new();
+    let mut canonical: HashMap<QKey, [f32; 2]> = HashMap::new();
+    let mut unused: HashSet<(QKey, QKey)> = HashSet::new();
 
     for segment in &set.segments {
         let k0 = qkey(segment.p0, opts.quantize);
@@ -70,13 +85,19 @@ pub fn stitch_contours(set: &ContourSet, opts: StitchOptions) -> Result<Polyline
 
         canonical
             .entry(k0)
-            .or_insert([segment.p0[0], segment.p0[1], set.level]);
+            .or_insert([segment.p0[0], segment.p0[1]]);
         canonical
             .entry(k1)
-            .or_insert([segment.p1[0], segment.p1[1], set.level]);
+            .or_insert([segment.p1[0], segment.p1[1]]);
 
-        adjacency.entry(k0).or_default().push(k1);
-        adjacency.entry(k1).or_default().push(k0);
+        let neigh_a = adjacency.entry(k0).or_default();
+        if !neigh_a.contains(&k1) {
+            neigh_a.push(k1);
+        }
+        let neigh_b = adjacency.entry(k1).or_default();
+        if !neigh_b.contains(&k0) {
+            neigh_b.push(k0);
+        }
 
         unused.insert((k0, k1));
         unused.insert((k1, k0));
@@ -84,14 +105,17 @@ pub fn stitch_contours(set: &ContourSet, opts: StitchOptions) -> Result<Polyline
 
     let mut keyed = Vec::<(bool, Vec<QKey>)>::new();
 
-    for (&node, neighbors) in &adjacency {
-        if neighbors.len() != 1 {
+    // HashMap order is non-deterministic; sort seeds before walking.
+    let mut path_seeds: Vec<QKey> = adjacency
+        .iter()
+        .filter_map(|(&node, neighbors)| (neighbors.len() == 1).then_some(node))
+        .collect();
+    path_seeds.sort_unstable();
+    for seed in path_seeds {
+        if !has_available_neighbor(seed, &adjacency, &unused) {
             continue;
         }
-        if !has_available_neighbor(node, &adjacency, &unused) {
-            continue;
-        }
-        let mut keys = walk_path(node, &adjacency, &mut unused);
+        let mut keys = walk_path(seed, &adjacency, &mut unused);
         if keys.len() < 2 {
             continue;
         }
@@ -99,8 +123,8 @@ pub fn stitch_contours(set: &ContourSet, opts: StitchOptions) -> Result<Polyline
         keyed.push((false, keys));
     }
 
-    while let Some(&(start, _)) = unused.iter().next() {
-        let mut keys = walk_loop(start, &adjacency, &mut unused);
+    while let Some(start) = unused.iter().copied().min() {
+        let mut keys = walk_loop(start.0, &adjacency, &mut unused);
         if keys.len() < 3 {
             continue;
         }
@@ -112,14 +136,7 @@ pub fn stitch_contours(set: &ContourSet, opts: StitchOptions) -> Result<Polyline
 
     let mut polylines = Vec::with_capacity(keyed.len());
     for (is_closed, keys) in keyed {
-        let points = keys
-            .iter()
-            .map(|k| {
-                let mut p = canonical[k];
-                p[2] = set.level;
-                p
-            })
-            .collect::<Vec<_>>();
+        let points = keys.iter().map(|k| canonical[k]).collect::<Vec<_>>();
         polylines.push(Polyline {
             level: set.level,
             points,
@@ -144,8 +161,8 @@ fn validate_quantize(q: Quantize) -> Result<(), Error> {
 
 fn has_available_neighbor(
     node: QKey,
-    adjacency: &BTreeMap<QKey, Vec<QKey>>,
-    unused: &BTreeSet<(QKey, QKey)>,
+    adjacency: &HashMap<QKey, Vec<QKey>>,
+    unused: &HashSet<(QKey, QKey)>,
 ) -> bool {
     adjacency
         .get(&node)
@@ -154,8 +171,8 @@ fn has_available_neighbor(
 
 fn walk_path(
     start: QKey,
-    adjacency: &BTreeMap<QKey, Vec<QKey>>,
-    unused: &mut BTreeSet<(QKey, QKey)>,
+    adjacency: &HashMap<QKey, Vec<QKey>>,
+    unused: &mut HashSet<(QKey, QKey)>,
 ) -> Vec<QKey> {
     let mut keys = vec![start];
     let mut cur = start;
@@ -175,8 +192,8 @@ fn walk_path(
 
 fn walk_loop(
     start: QKey,
-    adjacency: &BTreeMap<QKey, Vec<QKey>>,
-    unused: &mut BTreeSet<(QKey, QKey)>,
+    adjacency: &HashMap<QKey, Vec<QKey>>,
+    unused: &mut HashSet<(QKey, QKey)>,
 ) -> Vec<QKey> {
     let mut keys = vec![start];
     let mut cur = start;
@@ -203,8 +220,8 @@ fn walk_loop(
 #[inline]
 fn next_neighbor(
     cur: QKey,
-    adjacency: &BTreeMap<QKey, Vec<QKey>>,
-    unused: &BTreeSet<(QKey, QKey)>,
+    adjacency: &HashMap<QKey, Vec<QKey>>,
+    unused: &HashSet<(QKey, QKey)>,
 ) -> Option<QKey> {
     adjacency.get(&cur).and_then(|neighbors| {
         neighbors
@@ -216,7 +233,7 @@ fn next_neighbor(
 }
 
 #[inline]
-fn remove_edge_pair(a: QKey, b: QKey, unused: &mut BTreeSet<(QKey, QKey)>) {
+fn remove_edge_pair(a: QKey, b: QKey, unused: &mut HashSet<(QKey, QKey)>) {
     let _ = unused.remove(&(a, b));
     let _ = unused.remove(&(b, a));
 }

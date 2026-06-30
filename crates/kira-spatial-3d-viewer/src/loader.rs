@@ -256,42 +256,75 @@ fn validate_layout(meta: &K3dMeshMeta, len: u64) -> Result<(), ViewerError> {
 }
 
 fn decode_vec3_f32(bytes: &[u8], offset: u64, size: u64) -> Result<Vec<[f32; 3]>, ViewerError> {
-    let start =
-        usize::try_from(offset).map_err(|_| ViewerError::Data("offset too large".to_string()))?;
-    let len = usize::try_from(size).map_err(|_| ViewerError::Data("size too large".to_string()))?;
-    let end = start
-        .checked_add(len)
-        .ok_or_else(|| ViewerError::Data("slice range overflow".to_string()))?;
-    let s = bytes
-        .get(start..end)
-        .ok_or_else(|| ViewerError::Data("slice out of bounds".to_string()))?;
+    let s = slice_at(bytes, offset, size)?;
+    if !s.len().is_multiple_of(12) {
+        return Err(ViewerError::Data(
+            "vec3 block size is not a multiple of 12".to_string(),
+        ));
+    }
 
-    let mut vals = Vec::<[f32; 3]>::with_capacity(s.len() / 12);
-    for c in s.chunks_exact(12) {
-        let x = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-        let y = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
-        let z = f32::from_le_bytes([c[8], c[9], c[10], c[11]]);
-        vals.push(sanitize_point([x, y, z]));
+    #[cfg(target_endian = "little")]
+    let mut vals: Vec<[f32; 3]> = match bytemuck::try_cast_slice::<u8, [f32; 3]>(s) {
+        Ok(aligned) => aligned.to_vec(),
+        Err(_) => decode_vec3_f32_unaligned(s),
+    };
+
+    #[cfg(target_endian = "big")]
+    let mut vals: Vec<[f32; 3]> = decode_vec3_f32_unaligned(s);
+
+    for p in &mut vals {
+        *p = sanitize_point(*p);
     }
     Ok(vals)
 }
 
 fn decode_u32(bytes: &[u8], offset: u64, size: u64) -> Result<Vec<u32>, ViewerError> {
+    let s = slice_at(bytes, offset, size)?;
+    if !s.len().is_multiple_of(4) {
+        return Err(ViewerError::Data(
+            "u32 block size is not a multiple of 4".to_string(),
+        ));
+    }
+
+    #[cfg(target_endian = "little")]
+    let vals: Vec<u32> = match bytemuck::try_cast_slice::<u8, u32>(s) {
+        Ok(aligned) => aligned.to_vec(),
+        Err(_) => s
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect(),
+    };
+
+    #[cfg(target_endian = "big")]
+    let vals: Vec<u32> = s
+        .chunks_exact(4)
+        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+
+    Ok(vals)
+}
+
+fn decode_vec3_f32_unaligned(s: &[u8]) -> Vec<[f32; 3]> {
+    let mut out = Vec::with_capacity(s.len() / 12);
+    for c in s.chunks_exact(12) {
+        let x = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+        let y = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
+        let z = f32::from_le_bytes([c[8], c[9], c[10], c[11]]);
+        out.push([x, y, z]);
+    }
+    out
+}
+
+fn slice_at(bytes: &[u8], offset: u64, size: u64) -> Result<&[u8], ViewerError> {
     let start =
         usize::try_from(offset).map_err(|_| ViewerError::Data("offset too large".to_string()))?;
     let len = usize::try_from(size).map_err(|_| ViewerError::Data("size too large".to_string()))?;
     let end = start
         .checked_add(len)
         .ok_or_else(|| ViewerError::Data("slice range overflow".to_string()))?;
-    let s = bytes
+    bytes
         .get(start..end)
-        .ok_or_else(|| ViewerError::Data("slice out of bounds".to_string()))?;
-
-    let mut vals = Vec::<u32>::with_capacity(s.len() / 4);
-    for c in s.chunks_exact(4) {
-        vals.push(u32::from_le_bytes([c[0], c[1], c[2], c[3]]));
-    }
-    Ok(vals)
+        .ok_or_else(|| ViewerError::Data("slice out of bounds".to_string()))
 }
 
 fn with_ext(prefix: &Path, ext: &str) -> PathBuf {

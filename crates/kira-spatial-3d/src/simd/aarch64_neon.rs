@@ -1,4 +1,5 @@
 #![cfg(target_arch = "aarch64")]
+#![allow(unsafe_code)]
 
 use core::arch::aarch64::*;
 

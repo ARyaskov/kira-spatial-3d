@@ -51,20 +51,31 @@ pub fn write_gltf<P: AsRef<Path>>(
     {
         let file = File::create(&bin_path)?;
         let mut w = BufWriter::new(file);
-        for p in &mesh.vertices {
-            for c in p {
-                w.write_all(&c.to_le_bytes())?;
+        #[cfg(target_endian = "little")]
+        {
+            w.write_all(bytemuck::cast_slice::<[f32; 3], u8>(&mesh.vertices))?;
+            if opts.write_normals {
+                w.write_all(bytemuck::cast_slice::<[f32; 3], u8>(&mesh.normals))?;
             }
+            w.write_all(bytemuck::cast_slice::<u32, u8>(&mesh.indices))?;
         }
-        if opts.write_normals {
-            for n in &mesh.normals {
-                for c in n {
+        #[cfg(target_endian = "big")]
+        {
+            for p in &mesh.vertices {
+                for c in p {
                     w.write_all(&c.to_le_bytes())?;
                 }
             }
-        }
-        for &idx in &mesh.indices {
-            w.write_all(&idx.to_le_bytes())?;
+            if opts.write_normals {
+                for n in &mesh.normals {
+                    for c in n {
+                        w.write_all(&c.to_le_bytes())?;
+                    }
+                }
+            }
+            for &idx in &mesh.indices {
+                w.write_all(&idx.to_le_bytes())?;
+            }
         }
         w.flush()?;
     }

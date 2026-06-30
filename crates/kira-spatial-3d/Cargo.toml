@@ -1,32 +1,39 @@
 [package]
 name = "kira-spatial-3d"
 description = "Deterministic 3D mesh, contour, and export primitives for spatial omics fields."
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.95"
-license = "MIT"
-repository = "https://github.com/ARyaskov/kira-spatial-3d"
-keywords = [
-    "bioinformatics",
-    "spatial",
-    "3d",
-    "mesh",
-    "oncology"
-]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
 categories = [
     "science",
     "science::bioinformatics",
     "science::bioinformatics::genomics",
-    "graphics"
+    "graphics",
 ]
 
 [features]
 default = []
 gltf = []
+# Optional dependency on `kira-spatial-field`. Enable when you want to
+# wrap a `kira_spatial_field::Field` as a 3D `ScalarField` without
+# manually copying its `values()` slice.
+with-field = ["dep:kira-spatial-field"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytemuck = { workspace = true }
+kira-spatial-field = { version = "0.2", optional = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
+proptest = { workspace = true }
+criterion = { workspace = true }
+kira-spatial-field = "0.2"
+
+[[bench]]
+name = "hot_paths"
+harness = false
